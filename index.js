@@ -7,6 +7,7 @@ const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 const BOT_API_KEY = process.env.BOT_API_KEY;
 const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 
+// Проверка наличия обязательных переменных окружения
 if (!BOT_API_KEY) {
     throw new Error('BOT_API_KEY не задан в .env файле.');
 }
@@ -26,7 +27,7 @@ bot.use(session({
 }));
 
 const mainKeyboard = new Keyboard()
-    .text('Перейти на сайт 🌐')
+    .text('Перейти на сайт3108 🌐')
     .row()
     .text('Наши контакты 📞')
     .resized()
@@ -55,84 +56,78 @@ const checkFileSize = async (ctx, file) => {
     return true;
 };
 
-// ---- MIDDLEWARE ----
+// --- MIDDLEWARE ---
 
-// Middleware для обработки ответов администратора
-const adminReplyMiddleware = async (ctx, next) => {
-    // Проверяем, что это сообщение от администратора, и что оно является ответом
-    if (ctx.from.id !== ADMIN_CHAT_ID || !ctx.message.reply_to_message) {
-        await next();
-        return;
-    }
-
-    // Проверяем, что это ответ на сообщение от бота
-    if (ctx.message.reply_to_message.from.id !== bot.botInfo.id) {
-        await next();
-        return;
-    }
-
-    const repliedMessageText = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption;
-    const userIdMatch = repliedMessageText?.match(/ID: `(\d+)`/);
-    const targetUserId = userIdMatch && Number(userIdMatch[1]);
-
-    if (!userIdMatch || isNaN(targetUserId)) {
-        await ctx.reply('Не удалось найти ID пользователя в сообщении, на которое вы отвечаете.', {
-            reply_to_message_id: ctx.message.message_id
-        });
-        return;
-    }
-
+// Универсальная функция для отправки сообщения клиенту
+const sendToClient = async (ctx, targetUserId) => {
     try {
-        const messageToClient = ctx.message.text || ctx.message.caption || '';
+        const adminMessage = ctx.message;
         
-        if (ctx.message.text) {
-            await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${messageToClient}`, { parse_mode: 'Markdown' });
-        } else if (ctx.message.photo) {
-            const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendPhoto(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.document) {
-            const fileId = ctx.message.document.file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendDocument(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.video) {
-            const fileId = ctx.message.video.file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendVideo(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.animation) {
-            const fileId = ctx.message.animation.file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendAnimation(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.audio) {
-            const fileId = ctx.message.audio.file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendAudio(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.voice) {
-            const fileId = ctx.message.voice.file_id;
-            const caption = `*Ответ от FromGood:*\n\n${messageToClient}`;
-            await bot.api.sendVoice(targetUserId, fileId, { caption, parse_mode: 'Markdown' });
-        } else if (ctx.message.video_note) {
-            const fileId = ctx.message.video_note.file_id;
-            await bot.api.sendVideoNote(targetUserId, fileId);
-        } else if (ctx.message.sticker) {
-            const fileId = ctx.message.sticker.file_id;
-            await bot.api.sendSticker(targetUserId, fileId);
+        // Формируем подпись для медиафайлов
+        const captionText = `*Ответ от FromGood:*\n\n${adminMessage.caption || ''}`;
+
+        // Проверяем тип сообщения и отправляем соответствующий контент
+        if (adminMessage.text) {
+            await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${adminMessage.text}`, { parse_mode: 'Markdown' });
+        } else if (adminMessage.photo) {
+            await bot.api.sendPhoto(targetUserId, adminMessage.photo[adminMessage.photo.length - 1].file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.document) {
+            await bot.api.sendDocument(targetUserId, adminMessage.document.file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.video) {
+            await bot.api.sendVideo(targetUserId, adminMessage.video.file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.animation) {
+            await bot.api.sendAnimation(targetUserId, adminMessage.animation.file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.audio) {
+            await bot.api.sendAudio(targetUserId, adminMessage.audio.file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.voice) {
+            await bot.api.sendVoice(targetUserId, adminMessage.voice.file_id, { caption: captionText, parse_mode: 'Markdown' });
+        } else if (adminMessage.video_note) {
+            await bot.api.sendVideoNote(targetUserId, adminMessage.video_note.file_id);
+        } else if (adminMessage.sticker) {
+            await bot.api.sendSticker(targetUserId, adminMessage.sticker.file_id);
         } else {
             await ctx.reply('Извините, этот тип сообщения не поддерживается для ответа клиенту. ❌', {
-                reply_to_message_id: ctx.message.message_id
+                reply_to_message_id: adminMessage.message_id
             });
             return;
         }
 
         await ctx.reply('Ответ успешно отправлен клиенту. ✅', {
-            reply_to_message_id: ctx.message.message_id
+            reply_to_message_id: adminMessage.message_id
         });
+
     } catch (error) {
         console.error('Ошибка при отправке ответа клиенту:', error);
         await ctx.reply('Не удалось отправить ответ клиенту. ❌ Возможно, он заблокировал бота.', {
             reply_to_message_id: ctx.message.message_id
         });
     }
+};
+
+const adminReplyMiddleware = async (ctx, next) => {
+    // Проверяем, что это сообщение от администратора, и оно является ответом на сообщение бота
+    const { userId } = getUserInfo(ctx);
+    if (userId !== ADMIN_CHAT_ID || !ctx.message.reply_to_message) {
+        return next();
+    }
+    
+    if (ctx.message.reply_to_message.from.id !== bot.botInfo.id) {
+        return next();
+    }
+
+    const repliedMessageText = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption;
+    const userIdMatch = repliedMessageText?.match(/ID: `(\d+)`/);
+    const targetUserId = userIdMatch && Number(userIdMatch[1]);
+
+    if (!targetUserId || isNaN(targetUserId)) {
+        await ctx.reply('Не удалось найти ID пользователя в сообщении, на которое вы отвечаете.', {
+            reply_to_message_id: ctx.message.message_id
+        });
+        return;
+    }
+
+    // Передаем управление в новую функцию, чтобы не дублировать код
+    await sendToClient(ctx, targetUserId);
 };
 
 // --- ОСНОВНЫЕ ОБРАБОТЧИКИ ---
@@ -163,14 +158,14 @@ bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: \`${targetUserId}\`):`);
 });
 
-// 🔥 ИСПРАВЛЕНИЕ: Этот обработчик должен быть первым, чтобы перехватывать ответы администратора
+// 🔥 Важно: этот обработчик должен быть первым, чтобы перехватывать ответы администратора
 bot.on([
     'message:text', 'message:photo', 'message:document', 'message:video', 'message:animation', 
     'message:audio', 'message:sticker', 'message:voice', 'message:video_note'
 ], adminReplyMiddleware);
 
 // Единый обработчик для сообщений клиентов
-// 🔥 ИСПРАВЛЕНИЕ: Этот обработчик должен идти после middleware администратора
+// 🔥 Этот обработчик должен идти после middleware администратора
 bot.on(['message:text', 'message:photo', 'message:document', 'message:video', 'message:animation', 'message:audio', 'message:sticker', 'message:voice', 'message:video_note'], async (ctx) => {
     const { userId, userName } = getUserInfo(ctx);
     
