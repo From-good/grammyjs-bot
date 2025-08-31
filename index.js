@@ -12,6 +12,10 @@ const mainKeyboard = new Keyboard()
   .resized()
   .persistent();
 
+// Храним ID пользователей, чтобы сопоставлять их с сообщениями
+// В реальном проекте лучше использовать базу данных
+const userMessages = new Map();
+
 bot.command('start', async (ctx) => {
   await ctx.reply('Привет! Напиши нам сообщение или выбери одну из кнопок ниже, чтобы получить нужную информацию.', {
     reply_markup: mainKeyboard
@@ -26,48 +30,62 @@ bot.hears('Наши контакты', async (ctx) => {
   await ctx.reply('Наши контакты: info@fromgood.ru, +7 (495) 973-31-39');
 });
 
-// Отвечаем клиенту
 bot.on('message:text', async (ctx) => {
   const adminId = String(ADMIN_CHAT_ID);
   const senderId = String(ctx.from.id);
+  const botInfo = await bot.api.getMe();
+  const botId = botInfo.id;
 
-  // Проверяем, отвечает ли администратор на сообщение
+  // Игнорируем сообщения от самого бота
+  if (ctx.from.id === botId) {
+    return;
+  }
+
+  // Проверяем, отвечает ли администратор на сообщение, и что это его ID
   if (senderId === adminId && ctx.message.reply_to_message) {
     const repliedMessage = ctx.message.reply_to_message;
-    const repliedText = repliedMessage.text;
-    const repliedFromId = repliedMessage.from.id;
+    
+    // Проверяем, что это ответ на пересланное сообщение, а не на обычный текст
+    if (repliedMessage.forward_from) {
+      const targetUserId = repliedMessage.forward_from.id;
+      const messageToClient = ctx.message.text;
 
-    // Проверяем, что это ответ на сообщение от бота, которое было переслано от клиента
-    if (repliedFromId === bot.botInfo.id) {
-      const forwardedMessage = repliedMessage.forward_from;
-      if (forwardedMessage) {
-        const targetUserId = forwardedMessage.id;
-        const messageToClient = ctx.message.text;
-
-        try {
-          await bot.api.sendMessage(targetUserId, `FromGood:\n\n${messageToClient}`);
-          await ctx.reply('Ответ успешно отправлен клиенту.');
-        } catch (error) {
+      try {
+        await bot.api.sendMessage(targetUserId, `FromGood:\n\n${messageToClient}`);
+        await ctx.reply('Ответ успешно отправлен клиенту.');
+      } catch (error) {
+        if (error instanceof GrammyError && error.description.includes('bot was blocked by the user')) {
+          await ctx.reply('Не удалось отправить ответ клиенту. Бот был заблокирован пользователем.');
+        } else {
           console.error('Ошибка при отправке ответа клиенту:', error);
-          await ctx.reply('Не удалось отправить ответ клиенту. Возможно, он заблокировал бота.');
+          await ctx.reply('Не удалось отправить ответ клиенту. Произошла неизвестная ошибка.');
         }
-        return;
       }
+      return; // Завершаем обработку
+    } else {
+      await ctx.reply('Вы отвечаете не на пересланное сообщение пользователя. Отвечайте только на сообщения, которые переслал бот.');
+      return;
     }
   }
 
   // Если сообщение от клиента, пересылаем его администратору
   try {
     await ctx.reply('Спасибо за ваше сообщение! Мы скоро свяжемся с вами.');
+    // Пересылаем сообщение администратору, чтобы сохранить информацию об отправителе
     await bot.api.forwardMessage(ADMIN_CHAT_ID, ctx.from.id, ctx.message.message_id);
-    const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'Пользователь';
+    
     const messageToAdmin = `
-      Новое сообщение от ${userName} (ID: ${userId}):
-      ${ctx.message.text}
+Новое сообщение от ${userName} (ID: ${ctx.from.id}):
+
+Текст сообщения:
+"${ctx.message.text}"
+
+Для ответа просто нажмите "Ответить" на пересланное сообщение.
     `.trim();
-    // Отправляем администратору ID пользователя, чтобы он мог на него ответить
+
     await bot.api.sendMessage(ADMIN_CHAT_ID, messageToAdmin);
+
   } catch (error) {
     console.error('Ошибка при отправке сообщения администратору:', error);
     await ctx.reply('Извините, произошла ошибка. Пожалуйста, попробуйте позже.');
