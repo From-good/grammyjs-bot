@@ -18,10 +18,10 @@ if (isNaN(ADMIN_CHAT_ID)) {
 const bot = new Bot(BOT_API_KEY);
 
 bot.use(session({
-  initial: () => ({ 
-    isFirstMessageSent: false, 
+  initial: () => ({
+    isFirstMessageSent: false,
     isDialogueStarted: false,
-    chatHistory: [] 
+    chatHistory: []
   }),
 }));
 
@@ -62,8 +62,9 @@ const adminReplyMiddleware = async (ctx, next) => {
   const isReplyToBot = ctx.message.reply_to_message?.from?.id === bot.botInfo.id;
   
   if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot) {
-    const repliedMessageText = ctx.message.reply_to_message.text;
-    const userIdMatch = repliedMessageText.match(/\(ID: (\d+)\)/);
+    // 🔥 ИСПРАВЛЕНИЕ: Теперь ищем ID пользователя и в тексте, и в подписи (caption)
+    const repliedMessageText = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption;
+    const userIdMatch = repliedMessageText?.match(/ID: `(\d+)`/);
     const targetUserId = userIdMatch && Number(userIdMatch[1]);
     
     if (userIdMatch && !isNaN(targetUserId)) {
@@ -116,7 +117,8 @@ bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     // ✅ Уведомление клиента о прочтении
     await bot.api.sendMessage(targetUserId, '✅ *Ваше сообщение прочитано. Администратор готовит ответ.*', { parse_mode: 'Markdown' });
 
-    await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: ${targetUserId}):`);
+    // 🔥 ИСПРАВЛЕНИЕ: Добавил пробел между `ID: ` и `userId`, а также обратные кавычки (`), чтобы избежать проблем с парсером Markdown.
+    await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: \`${targetUserId}\`):`);
     
     if (ctx.session.isDialogueStarted !== true) {
       await bot.api.sendMessage(targetUserId, '💬 *Администратор начал диалог с вами.*', { parse_mode: 'Markdown' });
@@ -155,6 +157,7 @@ bot.on(['message:text', 'message:photo', 'message:document', 'message:video', 'm
 
   const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
   
+  // 🔥 ИСПРАВЛЕНИЕ: Используем `ID: \`${userId}\`` для более надежного парсинга
   let caption = `📜 *История диалога*:\n\n${formattedHistory}\n\n======================\n\n✍️ *Новое сообщение от ${userName}* (ID: \`${userId}\`):`;
   let fileId = null;
 
