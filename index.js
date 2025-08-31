@@ -26,7 +26,7 @@ bot.use(session({
 }));
 
 const mainKeyboard = new Keyboard()
-    .text('Перейти на сайт2226 🌐')
+    .text('Перейти на сайт 🌐')
     .row()
     .text('Наши контакты 📞')
     .resized()
