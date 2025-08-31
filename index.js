@@ -24,7 +24,7 @@ bot.use(session({
 }));
 
 const mainKeyboard = new Keyboard()
-    .text('Перейти на сайт2325 🌐')
+    .text('Перейти на сайт2330 🌐')
     .row()
     .text('Наши контакты 📞')
     .resized()
@@ -54,12 +54,15 @@ const checkFileSize = async (ctx, file) => {
 };
 
 // --- Middleware для отправки ответов администратора ---
-// 🔥 Использование bot.use() гарантирует, что этот код будет выполняться первым
-bot.use(async (ctx, next) => {
+// 🔥 Используем bot.on, чтобы явно обрабатывать сообщения, которые могут быть ответами
+bot.on([
+    'message:text', 'message:photo', 'message:document', 'message:video', 'message:animation',
+    'message:audio', 'message:sticker', 'message:voice', 'message:video_note'
+], async (ctx, next) => {
     const { userId } = getUserInfo(ctx);
     const repliedMessage = ctx.message?.reply_to_message;
 
-    // Проверяем, что это сообщение от администратора, и оно является ответом
+    // Если сообщение не от администратора или не является ответом, пропускаем
     if (userId !== ADMIN_CHAT_ID || !repliedMessage) {
         return next();
     }
@@ -70,17 +73,14 @@ bot.use(async (ctx, next) => {
     }
 
     let targetUserId = null;
-
-    // Ищем ID в тексте сообщения, на которое отвечаем
     const repliedMessageText = repliedMessage.text || repliedMessage.caption;
     const userIdMatch = repliedMessageText?.match(/ID: `(\d+)`/);
     if (userIdMatch) {
         targetUserId = Number(userIdMatch[1]);
     }
-    
-    // Если ID не найден, сообщаем администратору и выходим
+    
     if (!targetUserId || isNaN(targetUserId)) {
-        await ctx.reply('Не удалось найти ID пользователя в сообщении, на которое вы отвечаете. Пожалуйста, убедитесь, что в сообщении есть ID в формате: `ID: 12345`', {
+        await ctx.reply('Не удалось найти ID пользователя в сообщении, на которое вы отвечаете. Убедитесь, что в сообщении есть ID в формате: `ID: 12345`', {
             reply_to_message_id: ctx.message.message_id
         });
         return;
@@ -90,6 +90,7 @@ bot.use(async (ctx, next) => {
         const adminMessage = ctx.message;
         const captionText = `*Ответ от FromGood:*\n\n${adminMessage.caption || ''}`;
 
+        // Отправка сообщения клиенту в зависимости от типа
         if (adminMessage.text) {
             await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${adminMessage.text}`, { parse_mode: 'Markdown' });
         } else if (adminMessage.photo) {
