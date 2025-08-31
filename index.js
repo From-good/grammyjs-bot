@@ -5,14 +5,12 @@ const { session } = require('grammy');
 // --- Константы и конфигурация ---
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 const BOT_API_KEY = process.env.BOT_API_KEY;
-const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
+
 
 if (!BOT_API_KEY) {
   throw new Error('BOT_API_KEY не задан в .env файле.');
 }
-if (isNaN(ADMIN_CHAT_ID)) {
-  throw new Error('ADMIN_CHAT_ID не задан или не является числом в .env файле.');
-}
+
 // --- Конец блока констант ---
 
 const bot = new Bot(BOT_API_KEY);
