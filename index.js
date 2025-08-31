@@ -40,7 +40,7 @@ const sendInitialMessage = async (ctx) => {
 
 const getUserInfo = (ctx) => {
     const userId = ctx.from?.id;
-    // ИСПРАВЛЕНО: используем username, если он есть, иначе first_name
+    // Исправлено: используем username, если он есть, иначе first_name
     const username = ctx.from?.username || ctx.from?.first_name || 'Пользователь';
     return { userId, username };
 };
