@@ -40,8 +40,9 @@ const sendInitialMessage = async (ctx) => {
 
 const getUserInfo = (ctx) => {
     const userId = ctx.from?.id;
-    const userName = ctx.from?.first_name || 'Пользователь';
-    return { userId, userName };
+    // ИСПРАВЛЕНО: используем username, если он есть, иначе first_name
+    const username = ctx.from?.username || ctx.from?.first_name || 'Пользователь';
+    return { userId, username };
 };
 
 const checkFileSize = async (ctx, file) => {
@@ -73,7 +74,6 @@ bot.hears('Наши контакты 📞', async (ctx) => {
     await ctx.reply('Наши контакты: info@fromgood.ru, +7 (495) 973-31-39');
 });
 
-// ✅ ИСПРАВЛЕНО: Обработчик кнопки "Ответить" с force_reply
 bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     const targetUserId = Number(ctx.match[1]);
     await ctx.answerCallbackQuery();
@@ -84,9 +84,7 @@ bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
         console.warn(`Не удалось уведомить пользователя ${targetUserId}, возможно, он заблокировал бота.`);
     }
 
-    // Создаем специальный текст для ответа, в котором "спрятан" ID
     const replyText = `▶️ Введите ответ для пользователя ${targetUserId}`;
-
     await ctx.reply(replyText, {
         reply_markup: {
             force_reply: true,
@@ -95,162 +93,24 @@ bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     });
 });
 
-// 🔥 ОБРАБОТЧИК ДЛЯ ОТВЕТОВ И СООБЩЕНИЙ
-bot.on('message', async (ctx) => {
-    const { userId, userName } = getUserInfo(ctx);
+// --- Обработка сообщений ---
 
-    // ✅ ИСПРАВЛЕНО: Логика для ответов от администратора
+bot.on('message', async (ctx) => {
+    const { userId, username } = getUserInfo(ctx);
+
+    // Логика для ответов от администратора
     if (userId === ADMIN_CHAT_ID && ctx.message.reply_to_message) {
         const repliedMessageText = ctx.message.reply_to_message.text;
 
-        // Проверяем, что это ответ на наше "принудительное" сообщение
-        if (repliedMessageText && repliedMessageText.startsWith('▶️ Введите ответ для пользователя')) {
+        if (repliedMessageText?.startsWith('▶️ Введите ответ для пользователя')) {
             const targetUserId = Number(repliedMessageText.split(' ')[4]);
-
-            if (!isNaN(targetUserId)) {
-                try {
-                    const adminMessage = ctx.message;
-                    const captionText = `*Ответ от FromGood:*\n\n${adminMessage.caption || ''}`;
-
-                    if (adminMessage.text) {
-                        await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${adminMessage.text}`, { parse_mode: 'Markdown' });
-                    } else if (adminMessage.photo) {
-                        await bot.api.sendPhoto(targetUserId, adminMessage.photo[adminMessage.photo.length - 1].file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.document) {
-                        await bot.api.sendDocument(targetUserId, adminMessage.document.file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.video) {
-                        await bot.api.sendVideo(targetUserId, adminMessage.video.file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.animation) {
-                        await bot.api.sendAnimation(targetUserId, adminMessage.animation.file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.audio) {
-                        await bot.api.sendAudio(targetUserId, adminMessage.audio.file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.voice) {
-                        await bot.api.sendVoice(targetUserId, adminMessage.voice.file_id, { caption: captionText, parse_mode: 'Markdown' });
-                    } else if (adminMessage.video_note) {
-                        await bot.api.sendVideoNote(targetUserId, adminMessage.video_note.file_id);
-                    } else if (adminMessage.sticker) {
-                        await bot.api.sendSticker(targetUserId, adminMessage.sticker.file_id);
-                    } else {
-                        await ctx.reply('❌ Извините, этот тип сообщения не поддерживается для ответа клиенту.', { reply_to_message_id: adminMessage.message_id });
-                    }
-                    await ctx.reply('✅ Ответ успешно отправлен клиенту.', { reply_to_message_id: adminMessage.message_id });
-                } catch (error) {
-                    console.error('Ошибка при отправке ответа клиенту:', error);
-                    await ctx.reply('❌ Не удалось отправить ответ клиенту. Возможно, он заблокировал бота.', { reply_to_message_id: ctx.message.message_id });
-                }
+            if (isNaN(targetUserId)) {
+                await ctx.reply('❌ Ошибка: Не удалось определить ID пользователя для ответа.', { reply_to_message_id: ctx.message.message_id });
+                return;
             }
-            return; // Важно! Завершаем выполнение, чтобы не обрабатывать дальше
-        }
-    }
-
-    // Логика для сообщений от клиента
-    if (userId !== ADMIN_CHAT_ID) {
-        await sendInitialMessage(ctx);
-        const messageText = ctx.message.text || `_медиафайл (${Object.keys(ctx.message).filter(k => ['photo', 'document', 'video', 'animation', 'audio', 'sticker', 'voice', 'video_note'].includes(k))})_`;
-        const newMessage = {
-            from: userName,
-            text: messageText,
-            timestamp: new Date().toLocaleTimeString('ru-RU')
-        };
-        ctx.session.chatHistory.push(newMessage);
-
-        if (ctx.session.chatHistory.length > 5) {
-            ctx.session.chatHistory.shift();
-        }
-
-        const formattedHistory = ctx.session.chatHistory
-            .map(msg => `*${msg.from}* _(${msg.timestamp})_:\n${msg.text}`)
-            .join('\n\n---\n\n');
-
-        const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
-        
-        let caption = `📜 *История диалога*:\n\n${formattedHistory}\n\n======================\n\n✍️ *Новое сообщение от ${userName}* (ID: \`${userId}\`):`;
-        let fileId = null;
-
-        if (ctx.message.text) {
-            const messageTextForAdmin = `${caption}\n\n"${ctx.message.text}"`;
-            await bot.api.sendMessage(ADMIN_CHAT_ID, messageTextForAdmin, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.photo) {
-            fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-            if (!await checkFileSize(ctx, ctx.message.photo[ctx.message.photo.length - 1])) return;
-            caption += `\n\n_Новое фото_`;
-            if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-            await bot.api.sendPhoto(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.document) {
-            fileId = ctx.message.document.file_id;
-            if (!await checkFileSize(ctx, ctx.message.document)) return;
-            caption += `\n\n_Новый документ_`;
-            if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-            await bot.api.sendDocument(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.video) {
-            fileId = ctx.message.video.file_id;
-            if (!await checkFileSize(ctx, ctx.message.video)) return;
-            caption += `\n\n_Новое видео_`;
-            if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-            await bot.api.sendVideo(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.animation) {
-            fileId = ctx.message.animation.file_id;
-            if (!await checkFileSize(ctx, ctx.message.animation)) return;
-            caption += `\n\n_Новая GIF-анимация_`;
-            if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-            await bot.api.sendAnimation(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.audio) {
-            fileId = ctx.message.audio.file_id;
-            if (!await checkFileSize(ctx, ctx.message.audio)) return;
-            caption += `\n\n_Новый аудиофайл_`;
-            if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-            await bot.api.sendAudio(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.sticker) {
-            fileId = ctx.message.sticker.file_id;
-            await bot.api.sendSticker(ADMIN_CHAT_ID, fileId);
-            caption += `\n\n_Новый стикер_`;
-            await bot.api.sendMessage(ADMIN_CHAT_ID, caption, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.voice) {
-            fileId = ctx.message.voice.file_id;
-            if (!await checkFileSize(ctx, ctx.message.voice)) return;
-            caption += `\n\n_Новое голосовое сообщение_`;
-            await bot.api.sendVoice(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        } else if (ctx.message.video_note) {
-            fileId = ctx.message.video_note.file_id;
-            await bot.api.sendVideoNote(ADMIN_CHAT_ID, fileId);
-            caption += `\n\n_Новая видеозаметка_`;
-            await bot.api.sendMessage(ADMIN_CHAT_ID, caption, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-        }
-    }
-});
-
-// Глобальный обработчик ошибок
-bot.catch(async (err) => {
-    const ctx = err.ctx;
-    console.error(`Ошибка при обработке обновления ${ctx.update.update_id}:`);
-    const e = err.error;
-
-    let errorText = '🚨 *Произошла ошибка в работе бота!* 🚨\n\n';
-    if (e instanceof GrammyError) {
-        errorText += `**Тип ошибки:** Ошибка в запросе\n`;
-        errorText += `**Описание:** \`${e.description}\`\n`;
-        errorText += `**Код ошибки:** \`${e.error_code}\`\n`;
-    } else if (e instanceof HttpError) {
-        errorText += `**Тип ошибки:** Ошибка HTTP-запроса\n`;
-        errorText += `**Описание:** Не удалось связаться с Telegram. \`${e.message}\`\n`;
-    } else {
-        errorText += `**Тип ошибки:** Неизвестная ошибка\n`;
-        errorText += `**Описание:** \`${e.message}\`\n`;
-    }
-
-    errorText += `\n*Информация об обновлении:*\n`;
-    errorText += `\`\`\`json\n${JSON.stringify(ctx.update, null, 2)}\n\`\`\``;
-
-    try {
-        await bot.api.sendMessage(ADMIN_CHAT_ID, errorText, { parse_mode: 'Markdown' });
-    } catch (sendError) {
-        console.error('Не удалось отправить сообщение об ошибке администратору:', sendError);
-    }
-});
-
-async function main() {
-    await bot.start();
-    console.log('Бот запущен!');
-}
-
-main().catch(console.error);
+            
+            try {
+                if (ctx.message.text) {
+                    await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${ctx.message.text}`, { parse_mode: 'Markdown' });
+                } else if (ctx.message.caption) {
+                    const mediaType = Object.keys(ctx.message).find(k => ['photo', 'document', 'video', '
