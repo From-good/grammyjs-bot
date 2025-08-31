@@ -16,7 +16,7 @@ if (isNaN(ADMIN_CHAT_ID)) {
 const bot = new Bot(BOT_API_KEY);
 
 bot.use(session({
-  initial: () => ({ isFirstMessageSent: false }),
+    initial: () => ({ isFirstMessageSent: false }),
 }));
 
 const mainKeyboard = new Keyboard()
@@ -53,10 +53,9 @@ const checkFileSize = async (ctx, file) => {
 // Middleware для обработки ответов администратора
 const adminReplyMiddleware = async (ctx, next) => {
   const isReplyToBot = ctx.message.reply_to_message?.from?.id === bot.botInfo.id;
-  const repliedMessageText = ctx.message.reply_to_message?.text;
   
-  // Проверяем, что сообщение - ответ от администратора на сгенерированный ботом текст
-  if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot && repliedMessageText?.startsWith('Ответьте на это сообщение')) {
+  if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot) {
+    const repliedMessageText = ctx.message.reply_to_message.text;
     const userIdMatch = repliedMessageText.match(/\(ID: (\d+)\)/);
     const targetUserId = userIdMatch && Number(userIdMatch[1]);
     
@@ -78,14 +77,13 @@ const adminReplyMiddleware = async (ctx, next) => {
         reply_to_message_id: ctx.message.message_id
       });
     }
-    return; // Важно: завершаем обработку здесь
   } else {
     await next(); // Передаём управление следующему middleware
   }
 };
 
 // Middleware для пересылки сообщений от клиентов
-const clientMessageMiddleware = async (ctx) => {
+const clientMessageMiddleware = async (ctx, next) => {
   const { userId, userName } = getUserInfo(ctx);
   
   if (userId !== ADMIN_CHAT_ID) { // Убедимся, что это не сообщение от админа
@@ -102,7 +100,7 @@ const clientMessageMiddleware = async (ctx) => {
       await ctx.reply('Извините, произошла ошибка. 😔 Пожалуйста, попробуйте позже.');
     }
   }
-  // В этом middleware не нужен next(), так как он - конечный обработчик
+  await next();
 };
 
 // --- ОСНОВНЫЕ ОБРАБОТЧИКИ ---
@@ -126,9 +124,9 @@ bot.hears('Наши контакты 📞', async (ctx) => {
 
 // Обработчик нажатия на inline-кнопку "Ответить"
 bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
-  const targetUserId = Number(ctx.match[1]);
-  await ctx.answerCallbackQuery();
-  await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: ${targetUserId}):`);
+    const targetUserId = Number(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: ${targetUserId}):`);
 });
 
 // Применяем middleware к текстовым сообщениям
@@ -223,6 +221,7 @@ bot.on('message:audio', async (ctx) => {
   const caption = `✍️ Новый аудиофайл от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
   await bot.api.sendAudio(ADMIN_CHAT_ID, audio.file_id, { caption, reply_markup: inlineKeyboard });
 });
+
 
 // Глобальный обработчик ошибок
 bot.catch((err) => {
