@@ -26,7 +26,7 @@ bot.use(session({
 }));
 
 const mainKeyboard = new Keyboard()
-    .text('Перейти на сайт 🌐')
+    .text('Перейти на сайт2226 🌐')
     .row()
     .text('Наши контакты 📞')
     .resized()
@@ -159,7 +159,7 @@ bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     const targetUserId = Number(ctx.match[1]);
     await ctx.answerCallbackQuery();
     
-    await bot.api.sendMessage(targetUserId, '✅ *Ваше сообщение прочитано. Администратор готовит ответ2221.*', { parse_mode: 'Markdown' });
+    await bot.api.sendMessage(targetUserId, '✅ *Ваше сообщение прочитано. Администратор готовит ответ.*', { parse_mode: 'Markdown' });
     await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: \`${targetUserId}\`):`);
 });
 
