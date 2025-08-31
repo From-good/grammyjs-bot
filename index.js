@@ -53,9 +53,10 @@ const checkFileSize = async (ctx, file) => {
 // Middleware для обработки ответов администратора
 const adminReplyMiddleware = async (ctx, next) => {
   const isReplyToBot = ctx.message.reply_to_message?.from?.id === bot.botInfo.id;
+  const repliedMessageText = ctx.message.reply_to_message?.text;
   
-  if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot) {
-    const repliedMessageText = ctx.message.reply_to_message.text;
+  // Проверяем, что сообщение - ответ от администратора на сгенерированный ботом текст
+  if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot && repliedMessageText?.startsWith('Ответьте на это сообщение')) {
     const userIdMatch = repliedMessageText.match(/\(ID: (\d+)\)/);
     const targetUserId = userIdMatch && Number(userIdMatch[1]);
     
