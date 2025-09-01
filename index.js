@@ -16,11 +16,7 @@ if (isNaN(ADMIN_CHAT_ID)) {
 const bot = new Bot(BOT_API_KEY);
 
 bot.use(session({
-  initial: () => ({ 
-    isFirstMessageSent: false, 
-    isDialogueStarted: false,
-    chatHistory: [] // Новое поле для хранения истории чата
-  }),
+    initial: () => ({ isFirstMessageSent: false }),
 }));
 
 const mainKeyboard = new Keyboard()
@@ -33,8 +29,6 @@ const mainKeyboard = new Keyboard()
 // Универсальные функции
 const sendInitialMessage = async (ctx) => {
   if (!ctx.session.isFirstMessageSent) {
-    await ctx.replyWithChatAction('typing');
-    await new Promise(resolve => setTimeout(resolve, 1000));
     await ctx.reply('Спасибо за ваше сообщение! Мы скоро свяжемся с вами. 🙏');
     ctx.session.isFirstMessageSent = true;
   }
@@ -48,8 +42,6 @@ const getUserInfo = (ctx) => {
 
 const checkFileSize = async (ctx, file) => {
   if (file.file_size > MAX_FILE_SIZE_BYTES) {
-    await ctx.replyWithChatAction('typing');
-    await new Promise(resolve => setTimeout(resolve, 1000));
     await ctx.reply(`Извините, файл слишком большой. 😥 Максимальный размер файла — ${MAX_FILE_SIZE_BYTES / 1024 / 1024} МБ.`);
     return false;
   }
@@ -60,19 +52,28 @@ const checkFileSize = async (ctx, file) => {
 
 // Middleware для обработки ответов администратора
 const adminReplyMiddleware = async (ctx, next) => {
-  const isReplyToBot = ctx.message.reply_to_message?.from?.id === bot.botInfo.id;
-  
+  // ❗️ ИСПРАВЛЕНИЕ 1: Используем ctx.me.id вместо bot.botInfo.id.
+  // Это надежный способ получить ID бота внутри любого обработчика.
+  const isReplyToBot = ctx.message?.reply_to_message?.from?.id === ctx.me.id;
+
   if (ctx.from?.id === ADMIN_CHAT_ID && isReplyToBot) {
-    const repliedMessageText = ctx.message.reply_to_message.text;
+    // ❗️ ИСПРАВЛЕНИЕ 2: Проверяем и текст, и подпись к медиа, чтобы можно было отвечать на пересланные фото/видео.
+    const repliedMessageText = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption;
+
+    if (!repliedMessageText) {
+        await ctx.reply('Не могу обработать ответ на это сообщение, так как в нем нет текста или подписи с ID клиента.', {
+           reply_to_message_id: ctx.message.message_id
+        });
+        return; // Завершаем обработку
+    }
+
     const userIdMatch = repliedMessageText.match(/\(ID: (\d+)\)/);
     const targetUserId = userIdMatch && Number(userIdMatch[1]);
-    
-    if (userIdMatch && !isNaN(targetUserId)) {
+
+    if (targetUserId) {
       const messageToClient = ctx.message.text;
       try {
-        await bot.api.sendMessage(targetUserId, `*Ответ от FromGood:*\n\n${messageToClient}`, { parse_mode: 'Markdown' });
-        await ctx.replyWithChatAction('typing');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await bot.api.sendMessage(targetUserId, `FromGood:\n\n${messageToClient}`);
         await ctx.reply('Ответ успешно отправлен клиенту. ✅', {
           reply_to_message_id: ctx.message.message_id
         });
@@ -88,168 +89,169 @@ const adminReplyMiddleware = async (ctx, next) => {
       });
     }
   } else {
+    await next(); // Передаём управление следующему middleware
+  }
+};
+
+// Middleware для пересылки сообщений от клиентов
+const clientMessageMiddleware = async (ctx, next) => {
+  const { userId, userName } = getUserInfo(ctx);
+
+  if (userId !== ADMIN_CHAT_ID) { // Это сообщение от клиента
+    try {
+      await sendInitialMessage(ctx);
+      const messageToAdmin = `✍️ Новое сообщение от ${userName} (ID: ${userId}):\n\n"${ctx.message.text}"`;
+      const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+
+      await bot.api.sendMessage(ADMIN_CHAT_ID, messageToAdmin, {
+        reply_markup: inlineKeyboard
+      });
+    } catch (error) {
+      console.error('Ошибка при отправке сообщения администратору:', error);
+      await ctx.reply('Извините, произошла ошибка. 😔 Пожалуйста, попробуйте позже.');
+    }
+    // ❗️ ИСПРАВЛЕНИЕ 3: Не вызываем next() после обработки сообщения клиента, так как оно уже полностью обработано.
+  } else {
+    // Если сообщение от админа (и это не ответ), передаем управление дальше,
+    // чтобы сработали обработчики кнопок (.hears)
     await next();
   }
 };
 
+
 // --- ОСНОВНЫЕ ОБРАБОТЧИКИ ---
 
+// Обработчик команды /start
 bot.command('start', async (ctx) => {
-  await ctx.replyWithChatAction('typing');
-  await new Promise(resolve => setTimeout(resolve, 1000));
   await ctx.reply('Привет 👋! Напиши нам сообщение или выбери одну из кнопок ниже, чтобы получить нужную информацию.', {
     reply_markup: mainKeyboard
   });
 });
 
+// Обработчик нажатия на кнопку "Перейти на сайт"
 bot.hears('Перейти на сайт 🌐', async (ctx) => {
-  await ctx.replyWithChatAction('typing');
-  await new Promise(resolve => setTimeout(resolve, 1000));
   await ctx.reply('Отлично! Вот ссылка на наш сайт: https://fromgood.ru');
 });
 
+// Обработчик нажатия на кнопку "Наши контакты"
 bot.hears('Наши контакты 📞', async (ctx) => {
-  await ctx.replyWithChatAction('typing');
-  await new Promise(resolve => setTimeout(resolve, 1000));
   await ctx.reply('Наши контакты: info@fromgood.ru, +7 (495) 973-31-39');
 });
 
+// Обработчик нажатия на inline-кнопку "Ответить"
 bot.callbackQuery(/^reply_to_(\d+)$/, async (ctx) => {
     const targetUserId = Number(ctx.match[1]);
     await ctx.answerCallbackQuery();
-    await ctx.replyWithChatAction('typing');
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Отправляем сообщение, на которое админ сможет ответить
     await ctx.reply(`Ответьте на это сообщение, чтобы отправить ответ пользователю (ID: ${targetUserId}):`);
+});
+
+// Применяем middleware к текстовым сообщениям
+bot.on('message:text', adminReplyMiddleware, clientMessageMiddleware);
+
+// Обработчики для медиафайлов (остаются без изменений)
+bot.on('message:photo', async (ctx) => {
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    if (!await checkFileSize(ctx, photo)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
     
-    if (ctx.session.isDialogueStarted !== true) {
-      await bot.api.sendMessage(targetUserId, '💬 *Администратор начал диалог с вами.*', { parse_mode: 'Markdown' });
-      ctx.session.isDialogueStarted = true;
-    }
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новое фото от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
+    await bot.api.sendPhoto(ADMIN_CHAT_ID, photo.file_id, { caption, reply_markup: inlineKeyboard });
 });
 
-// Единый обработчик для сообщений клиентов
-bot.on(['message:text', 'message:photo', 'message:document', 'message:video', 'message:animation', 'message:audio', 'message:sticker', 'message:voice', 'message:video_note'], async (ctx) => {
-  const { userId, userName } = getUserInfo(ctx);
-  
-  if (userId === ADMIN_CHAT_ID) {
-    return;
-  }
-  
-  await sendInitialMessage(ctx);
-  
-  // Добавляем текущее сообщение в историю чата
-  const messageText = ctx.message.text || `_медиафайл (${Object.keys(ctx.message).filter(k => ['photo', 'document', 'video', 'animation', 'audio', 'sticker', 'voice', 'video_note'].includes(k))})_`;
-  const newMessage = {
-    from: userName,
-    text: messageText,
-    timestamp: new Date().toLocaleTimeString('ru-RU')
-  };
-  ctx.session.chatHistory.push(newMessage);
-
-  // Ограничиваем историю до 5 последних сообщений
-  if (ctx.session.chatHistory.length > 5) {
-      ctx.session.chatHistory.shift(); 
-  }
-
-  // Формируем текст истории для администратора
-  const formattedHistory = ctx.session.chatHistory
-      .map(msg => `*${msg.from}* _(${msg.timestamp})_:\n${msg.text}`)
-      .join('\n\n---\n\n');
-
-  const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
-  
-  let caption = `📜 *История диалога*:\n\n${formattedHistory}\n\n======================\n\n✍️ *Новое сообщение от ${userName}* (ID: \`${userId}\`):`;
-  let fileId = null;
-
-  if (ctx.message.text) {
-    caption += `\n\n"${ctx.message.text}"`;
-    await bot.api.sendMessage(ADMIN_CHAT_ID, caption, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.photo) {
-    fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    if (!await checkFileSize(ctx, ctx.message.photo[ctx.message.photo.length - 1])) return;
-    caption += `\n\n_Новое фото_`;
-    if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-    await bot.api.sendPhoto(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.document) {
-    fileId = ctx.message.document.file_id;
-    if (!await checkFileSize(ctx, ctx.message.document)) return;
-    caption += `\n\n_Новый документ_`;
-    if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-    await bot.api.sendDocument(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.video) {
-    fileId = ctx.message.video.file_id;
-    if (!await checkFileSize(ctx, ctx.message.video)) return;
-    caption += `\n\n_Новое видео_`;
-    if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-    await bot.api.sendVideo(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.animation) {
-    fileId = ctx.message.animation.file_id;
-    if (!await checkFileSize(ctx, ctx.message.animation)) return;
-    caption += `\n\n_Новая GIF-анимация_`;
-    if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-    await bot.api.sendAnimation(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.audio) {
-    fileId = ctx.message.audio.file_id;
-    if (!await checkFileSize(ctx, ctx.message.audio)) return;
-    caption += `\n\n_Новый аудиофайл_`;
-    if (ctx.message.caption) caption += `\n\n${ctx.message.caption}`;
-    await bot.api.sendAudio(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.sticker) {
-    fileId = ctx.message.sticker.file_id;
-    if (!await checkFileSize(ctx, ctx.message.sticker)) return;
-    await bot.api.sendSticker(ADMIN_CHAT_ID, fileId);
-    caption += `\n\n_Новый стикер_`;
-    await bot.api.sendMessage(ADMIN_CHAT_ID, caption, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.voice) {
-    fileId = ctx.message.voice.file_id;
-    if (!await checkFileSize(ctx, ctx.message.voice)) return;
-    caption += `\n\n_Новое голосовое сообщение_`;
-    await bot.api.sendVoice(ADMIN_CHAT_ID, fileId, { caption, reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  } else if (ctx.message.video_note) {
-    fileId = ctx.message.video_note.file_id;
-    if (!await checkFileSize(ctx, ctx.message.video_note)) return;
-    await bot.api.sendVideoNote(ADMIN_CHAT_ID, fileId);
-    caption += `\n\n_Новая видеозаметка_`;
-    await bot.api.sendMessage(ADMIN_CHAT_ID, caption, { reply_markup: inlineKeyboard, parse_mode: 'Markdown' });
-  }
+bot.on('message:document', async (ctx) => {
+    const document = ctx.message.document;
+    if (!await checkFileSize(ctx, document)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новый документ от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
+    await bot.api.sendDocument(ADMIN_CHAT_ID, document.file_id, { caption, reply_markup: inlineKeyboard });
 });
 
-// Применяем middleware для обработки ответов администратора
-bot.on('message:text', adminReplyMiddleware);
+bot.on('message:video', async (ctx) => {
+    const video = ctx.message.video;
+    if (!await checkFileSize(ctx, video)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новое видео от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
+    await bot.api.sendVideo(ADMIN_CHAT_ID, video.file_id, { caption, reply_markup: inlineKeyboard });
+});
+
+bot.on('message:sticker', async (ctx) => {
+    const sticker = ctx.message.sticker;
+    if (!await checkFileSize(ctx, sticker)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const messageToAdmin = `✍️ Новый стикер от ${userName} (ID: ${userId})`;
+    await bot.api.sendMessage(ADMIN_CHAT_ID, messageToAdmin, { reply_markup: inlineKeyboard });
+    await bot.api.sendSticker(ADMIN_CHAT_ID, sticker.file_id);
+});
+
+bot.on('message:voice', async (ctx) => {
+    const voice = ctx.message.voice;
+    if (!await checkFileSize(ctx, voice)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новое голосовое сообщение от ${userName} (ID: ${userId})`;
+    await bot.api.sendVoice(ADMIN_CHAT_ID, voice.file_id, { caption, reply_markup: inlineKeyboard });
+});
+
+bot.on('message:video_note', async (ctx) => {
+    const videoNote = ctx.message.video_note;
+    if (!await checkFileSize(ctx, videoNote)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новая видеозаметка от ${userName} (ID: ${userId})`;
+    await bot.api.sendVideoNote(ADMIN_CHAT_ID, videoNote.file_id, { caption, reply_markup: inlineKeyboard });
+});
+
+bot.on('message:animation', async (ctx) => {
+    const animation = ctx.message.animation;
+    if (!await checkFileSize(ctx, animation)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новая GIF-анимация от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
+    await bot.api.sendAnimation(ADMIN_CHAT_ID, animation.file_id, { caption, reply_markup: inlineKeyboard });
+});
+
+bot.on('message:audio', async (ctx) => {
+    const audio = ctx.message.audio;
+    if (!await checkFileSize(ctx, audio)) return;
+    const { userId, userName } = getUserInfo(ctx);
+    const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply_to_${userId}`);
+    
+    await sendInitialMessage(ctx);
+    const caption = `✍️ Новый аудиофайл от ${userName} (ID: ${userId}):\n\n${ctx.message.caption || ''}`.trim();
+    await bot.api.sendAudio(ADMIN_CHAT_ID, audio.file_id, { caption, reply_markup: inlineKeyboard });
+});
 
 // Глобальный обработчик ошибок
-bot.catch(async (err) => {
+bot.catch((err) => {
   const ctx = err.ctx;
   console.error(`Ошибка при обработке обновления ${ctx.update.update_id}:`);
   const e = err.error;
-
-  let errorText = '🚨 *Произошла ошибка в работе бота!* 🚨\n\n';
-
   if (e instanceof GrammyError) {
-    errorText += `**Тип ошибки:** Ошибка в запросе\n`;
-    errorText += `**Описание:** \`${e.description}\`\n`;
-    errorText += `**Код ошибки:** \`${e.error_code}\`\n`;
+    console.error("Ошибка в запросе:", e.description);
   } else if (e instanceof HttpError) {
-    errorText += `**Тип ошибки:** Ошибка HTTP-запроса\n`;
-    errorText += `**Описание:** Не удалось связаться с Telegram. \`${e.message}\`\n`;
+    console.error("Не удалось связаться с Telegram:", e);
   } else {
-    errorText += `**Тип ошибки:** Неизвестная ошибка\n`;
-    errorText += `**Описание:** \`${e.message}\`\n`;
-  }
-
-  errorText += `\n*Информация об обновлении:*\n`;
-  errorText += `\`\`\`json\n${JSON.stringify(ctx.update, null, 2)}\n\`\`\``;
-
-  try {
-    await bot.api.sendMessage(ADMIN_CHAT_ID, errorText, { parse_mode: 'Markdown' });
-  } catch (sendError) {
-    console.error('Не удалось отправить сообщение об ошибке администратору:', sendError);
+    console.error("Неизвестная ошибка:", e);
   }
 });
 
 // Запуск бота
-async function main() {
-  await bot.start();
-}
-
-main().catch(console.error);
+bot.start();
